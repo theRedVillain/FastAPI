@@ -1,9 +1,16 @@
-from fastapi import FastAPI , Response , HTTPException ,status
+from fastapi import FastAPI , Response , HTTPException ,status , Depends
 from typing import Optional , Union
 from pydantic import BaseModel 
 from random import randrange
+from sqlalchemy.orm import Session
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from . import models 
+from .database import engine , get_db
+
+models.Base.metadata.create_all(bind=engine)
+get_db()
+
 
 class DataModel(BaseModel):
     title : str 
@@ -19,10 +26,15 @@ class update_data(BaseModel):
     column : str 
     value : Optional[Union[str, int]]
 
+class cinema_entry(BaseModel):
+    movie_name : str 
+    seats : int 
+
+class update_cinema(BaseModel):
+    movie_name : Optional[str] 
+    seats : Optional[int]
 
 app = FastAPI()
-
-data_collection = [{"title" : "The Haunted Ship" , "Price" : 260 , "id" : 24242},{"title" : "The Runner" , "Price" : 1260 ,"id" : 23232},{"title" : "Laapta Ladies" , "Price" : 660 , "id" : 1212}] 
 
 # Database Connection 
 try:
@@ -94,7 +106,54 @@ def delete_post(id : int):
         print("Data Deleted Successfully")
         return {"Data" : result}
     except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail=str(e))
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail=str(e)) 
+    
+@app.get("/cinema/all_post")
+def get_all_post(db: Session = Depends(get_db)):
+    result = db.query(models.cinema_db).all()
+    return {"Data" : result} 
+
+@app.post("/cinema/make_post") 
+def make_a_post( data : cinema_entry  , db: Session = Depends(get_db)):
+    try:
+        new_post = models.cinema_db(**data.dict())
+        db.add(new_post)
+        db.commit() 
+        db.refresh(new_post)
+        return {"Data" : new_post} 
+    except Exception as e:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail="Post not created")
         
+@app.get("/cinema/only_one/{id}")
+def get_only_one_post(id : int , db: Session = Depends(get_db)):
+    try:
+        post = db.query(models.cinema_db).filter(models.cinema_db.id == id)
+        if post.first() == None:
+            return HTTPException(status_code=status.HTTP_404_NOT_FOUND , detail = f'Entry with id {id} not present in database') 
+        return {"Data" : post.first()} 
+    except Exception as e:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail = str(e)) 
 
-
+@app.delete("/cinema/delete_post/{id}" , status_code=status.HTTP_204_NO_CONTENT)
+def delete_content(id : int ,db: Session = Depends(get_db)):
+    try:
+        post = db.query(models.cinema_db).filter(models.cinema_db.id == id)
+        if post.first() == None:
+            return HTTPException(status_code=status.HTTP_404_NOT_FOUND , detail = f'Entry with id {id} not present in database')  
+        post.delete(synchronize_session=False) 
+        db.commit()
+        return {"Message":"Post Deleted Successfully"} 
+    except Exception as e:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail = str(e)) 
+    
+@app.put("/cinema/update__content/{id}")
+def update_content_func(id : int , data : update_cinema, db: Session = Depends(get_db)):
+    try:
+        post = db.query(models.cinema_db).filter(models.cinema_db.id == id)
+        if post.first() == None:
+            return HTTPException(status_code=status.HTTP_404_NOT_FOUND , detail = f'Entry with id {id} not present in database') 
+        post.update(data.dict() , synchronize_session=False)
+        db.commit() 
+        return {"Data" : post.first()} 
+    except Exception as e:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail="Update failed")
