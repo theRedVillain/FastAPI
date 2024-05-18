@@ -1,159 +1,101 @@
-from fastapi import FastAPI , Response , HTTPException ,status , Depends
-from typing import Optional , Union
-from pydantic import BaseModel 
-from random import randrange
+from fastapi import FastAPI , Response , status , HTTPException , Depends
+from typing import Optional 
+from pydantic import BaseModel
+import psycopg2  
+from .database import *
+from .models import *
+from . import models
 from sqlalchemy.orm import Session
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from . import models 
-from .database import engine , get_db
+app = FastAPI() 
 
 models.Base.metadata.create_all(bind=engine)
 get_db()
 
-
-class DataModel(BaseModel):
-    title : str 
-    Price : int
-
-class database_entry(BaseModel):
+class Posts(BaseModel):
     name : str 
-    quantity : int 
-    on_sale : Optional[bool] 
-    price : int 
+    inventory : Optional[int] = 0 
+    price : int
 
-class update_data(BaseModel):
-    column : str 
-    value : Optional[Union[str, int]]
+class Users_Model(BaseModel):
+    name : str 
+    prime_member : Optional[bool] = False
 
-class cinema_entry(BaseModel):
-    movie_name : str 
-    seats : int 
-
-class update_cinema(BaseModel):
-    movie_name : Optional[str] 
-    seats : Optional[int]
-
-app = FastAPI()
-
-# Database Connection 
-try:
-
-    while True:
-
-        conn = psycopg2.connect(host="localhost",user="postgres",password="1@12@23@34@4" , database="postgres" , cursor_factory=RealDictCursor)
-
-        cursor = conn.cursor()
-
-        print("Connection Successsfull")
+while True:
+    try:
+        conn = psycopg2.connect(host="localhost",user="postgres",password="sonu",database="FastAPI")
+        cursor = conn.cursor()  
+        print("Connection Successfull") 
         break
-except Exception as e:
-    print(e)
-@app.get("/posts")
+    except Exception as e:
+        print("Connection Failed") 
+        print("Error Occured : ",e) 
+
+## Get all posts 
+
+@app.get("/all_posts")
 def get_all_posts():
-        cursor.execute("""
-                    SELECT * from products 
-                    """)
-        
-        result = cursor.fetchall()
-        print(result)
-        return {"Data" : result} 
-
-@app.post("/posts")
-def make_a_post(data : database_entry , response : Response):
     try:
-        data = data.dict() 
-        print(data)
-        result = cursor.execute("""INSERT INTO products (name , quantity , on_sale , price) VALUES(%s,%s,%s,%s) returning *""",(data['name'] , data['quantity'] , data['on_sale'] , data['price']))
-        result = cursor.fetchone()
+        cursor.execute("""SELECT * from  products""") 
+        posts = cursor.fetchall() 
+        print(1)
+        return {'data' : posts} , status.HTTP_200_OK
+    except Exception as e:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail=e) 
+    
+@app.get("/single_post/{id}")
+def get_single_post(id :int):
+    try:
+        cursor.execute("""SELECT * from products where pid = %s""" , (int(id) ,))
+        post = cursor.fetchone() 
+        return {'data':post} , status.HTTP_200_OK 
+    except Exception as e:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail=e) 
+    
+@app.post("/make_a_post")
+def make_a_post_func(data : Posts):
+    try:
+        cursor.execute("""INSERT INTO products (name , price , inventory) VALUES (%s,%s,%s) RETURNING *""",(data.name , data.price , data.inventory))
         conn.commit()
-        response.status_code = status.HTTP_201_CREATED 
-        print(result)
-        return {"Data":result} 
+        post = cursor.fetchone() 
+        return {post} , status.HTTP_200_OK
     except Exception as e:
-        print(e)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail= "Post not created")
-
-@app.get("/posts/{id}")
-def get_particular_posts(id : int):
-    try:
-        cursor.execute("""SELECT * from products where product_id = %s""" , (id , )) 
-        data = cursor.fetchone() 
-        return {"Data" : data} 
-    except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail = str(e))
-
-@app.put("/posts/{id}")
-def update_posts(id : int , data : update_data):
-    try:
-        data = data.dict()
-        result = cursor.execute(f"""UPDATE products SET {data['column']} = %s WHERE product_id = %s RETURNING *""" , (data['value'] , id))
-        result = cursor.fetchone()
-        conn.commit()
-        print("Data Updated Successfully") 
-        return {"Data" : result}
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail=e) 
     
+@app.put("/update_post/{id}")
+def update_post(id :int ,data : Posts):
+    try:
+        cursor.execute("""UPDATE products set price = %s where pid = %s returning *""",(data.price , id)) 
+        conn.commit() 
+        result = cursor.fetchone() 
+        return {result} , status.HTTP_200_OK 
     except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail=str(e))
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail=e) 
     
-
-@app.delete("/posts/{id}" , status_code=status.HTTP_204_NO_CONTENT)
-def delete_post(id : int):
+@app.delete("/delete_post/{id}")
+def delete_func(id : int , response : Response):
     try:
-        cursor.execute("""DELETE FROM products where product_id = %s returning *""" , (id ,))
-        result = cursor.fetchone()
-        conn.commit()
-        print("Data Deleted Successfully")
-        return {"Data" : result}
+        cursor.execute("""DELETE from products where pid = %s returning *""" , (id,))
+        deleted_post = cursor.fetchone() 
+        print(deleted_post) 
+        return status.HTTP_204_NO_CONTENT  
     except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail=str(e)) 
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail=e)
     
-@app.get("/cinema/all_post")
-def get_all_post(db: Session = Depends(get_db)):
-    result = db.query(models.cinema_db).all()
-    return {"Data" : result} 
+@app.get("/user/get_all_data")
+def testing(db: Session = Depends(get_db)):
+    data = db.query(models.User).all() 
+    return {"Data": data} 
 
-@app.post("/cinema/make_post") 
-def make_a_post( data : cinema_entry  , db: Session = Depends(get_db)):
-    try:
-        new_post = models.cinema_db(**data.dict())
-        db.add(new_post)
-        db.commit() 
-        db.refresh(new_post)
-        return {"Data" : new_post} 
-    except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail="Post not created")
-        
-@app.get("/cinema/only_one/{id}")
-def get_only_one_post(id : int , db: Session = Depends(get_db)):
-    try:
-        post = db.query(models.cinema_db).filter(models.cinema_db.id == id)
-        if post.first() == None:
-            return HTTPException(status_code=status.HTTP_404_NOT_FOUND , detail = f'Entry with id {id} not present in database') 
-        return {"Data" : post.first()} 
-    except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail = str(e)) 
+@app.post("/user/user_entry")
+def user_entry_function(user_entry : Users_Model , db: Session = Depends(get_db)):
+    new_user = models.User(name = user_entry.name , prime_member = user_entry.prime_member)
+    db.add(new_user) 
+    db.commit()
+    db.refresh(new_user)
+    return {"Data":new_user}
 
-@app.delete("/cinema/delete_post/{id}" , status_code=status.HTTP_204_NO_CONTENT)
-def delete_content(id : int ,db: Session = Depends(get_db)):
-    try:
-        post = db.query(models.cinema_db).filter(models.cinema_db.id == id)
-        if post.first() == None:
-            return HTTPException(status_code=status.HTTP_404_NOT_FOUND , detail = f'Entry with id {id} not present in database')  
-        post.delete(synchronize_session=False) 
-        db.commit()
-        return {"Message":"Post Deleted Successfully"} 
-    except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail = str(e)) 
-    
-@app.put("/cinema/update__content/{id}")
-def update_content_func(id : int , data : update_cinema, db: Session = Depends(get_db)):
-    try:
-        post = db.query(models.cinema_db).filter(models.cinema_db.id == id)
-        if post.first() == None:
-            return HTTPException(status_code=status.HTTP_404_NOT_FOUND , detail = f'Entry with id {id} not present in database') 
-        post.update(data.dict() , synchronize_session=False)
-        db.commit() 
-        return {"Data" : post.first()} 
-    except Exception as e:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST , detail="Update failed")
+
+
+
+
+
